@@ -1,0 +1,87 @@
+#!/usr/bin/perl
+my $instructions=qq(
+##
+# sms
+#
+# Send an SMS message, given on STDIN
+#
+# Usage: sms <phone>
+#
+# Where: phone is an 11 digit phone number
+#
+# Date:		April 16 2013		Version 0.1 (initial release)
+# Author:	Joseph Sullivan
+);
+
+# Configuration
+my $settings={
+
+	outgoing_did	=>		"12223334444",
+	cdyne_sms_key	=>		"000-cdyne-sms-key-goes-here-000",
+	cdyne_sms_url	=>		"http://sms2.cdyne.com/sms.svc/AdvancedSMSsend"
+};
+
+# Libraries
+use strict;
+use warnings;
+use JSON;
+use WWW::Curl::Easy;
+
+# Get outgoing phone number; validate
+my $did=int $ARGV[0];
+die("Invalid phone number!\n\n$instructions") unless (length($did) == 11);
+
+# Gather message from STDIN; truncate; validate
+my $message=join('',my @msg=<STDIN>);
+$message=(length($message)>160)?(substr($message, 0, 157)."..."):$message;
+die("Empty message!.\n\n$instructions") unless (length($message));
+
+# Create JSON request, and prepare to send it	
+my $json= {
+	'LicenseKey' => $settings->{cdyne_sms_key},
+	'SMSRequests' => [
+		{
+			'AssignedDID' => $settings->{outgoing_did},
+			'Message' => $message,
+			'PhoneNumbers' => [ $did ],
+			'ReferenceID' => ''
+		}
+	]
+};
+
+# Send with cURL
+my $curl = WWW::Curl::Easy->new;
+my $response_body="";
+open(my $RESPONSE_BODY, ">", \$response_body);
+$curl->setopt(CURLOPT_WRITEDATA, $RESPONSE_BODY);
+$curl->setopt(CURLOPT_URL, $settings->{cdyne_sms_url});
+$curl->setopt(CURLOPT_POST, 1);
+$curl->setopt(CURLOPT_POSTFIELDS, to_json($json));
+$curl->setopt(CURLOPT_HTTPHEADER, ['Content-Type: application/json','Accept: application/json']);
+my $retcode=$curl->perform();
+close($RESPONSE_BODY);
+if($retcode==0) {
+
+	# Grab the unique ID from the response body JSON
+	my $message_key="";
+	if(my $response_json=from_json($response_body)) {
+
+		$message_key=$response_json->[0]->{'MessageID'};
+	} else {
+	
+		die("CDYNE response: $response_body\n");
+	}
+
+	if($message_key eq "00000000-0000-0000-0000-000000000000" || $message_key eq "") {
+
+		die("CDYNE problem");
+	} 
+
+	print("Success\n");
+	exit();
+
+}
+
+die("Unable to perform cURL to CDYNE... invalid URL, possible network problem?");
+
+
